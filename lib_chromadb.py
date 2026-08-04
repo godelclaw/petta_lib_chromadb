@@ -1,11 +1,103 @@
+import os
+import json
+import re
 import uuid
+
 import chromadb
 
-CLIENT = chromadb.PersistentClient(path="./chroma_db")
+
+COLLECTION_NAME = os.environ.get("METTACLAW_CHROMA_COLLECTION", "memories")
+SYNC_THRESHOLD = int(os.environ.get("METTACLAW_CHROMA_SYNC_THRESHOLD", "20"))
+if SYNC_THRESHOLD <= 0:
+    raise ValueError("METTACLAW_CHROMA_SYNC_THRESHOLD must be greater than zero")
+
+_collection_metadata = {
+    "embedding_model": os.environ.get(
+        "METTACLAW_EMBED_MODEL", "unspecified"
+    ),
+    "embedding_backend": os.environ.get(
+        "METTACLAW_EMBED_BACKEND", "sentence-transformers"
+    ),
+    "embedding_output_dim": int(os.environ.get("METTACLAW_EMBED_DIM", "1024")),
+    "embedding_protocol": os.environ.get(
+        "METTACLAW_EMBED_PROTOCOL", "qwen3-embedding-8b-1024-v1"
+    ),
+    "embedding_normalized": os.environ.get(
+        "METTACLAW_EMBED_NORMALIZE", "1"
+    ).lower()
+    not in {"0", "false", "no"},
+    "embedding_query_prompt_name": os.environ.get(
+        "METTACLAW_EMBED_QUERY_PROMPT_NAME", "query"
+    ),
+    "hnsw:space": os.environ.get("METTACLAW_CHROMA_METRIC", "cosine"),
+    "hnsw:sync_threshold": SYNC_THRESHOLD,
+}
+
+CLIENT = chromadb.PersistentClient(
+    path=os.environ.get("METTACLAW_CHROMA_DIR")
+    or os.environ.get("OMEGACLAW_CHROMA_DIR")
+    or "./chroma_db"
+)
 COLLECTION = CLIENT.get_or_create_collection(
-    name="memories",
+    name=COLLECTION_NAME,
+    metadata=_collection_metadata,
     embedding_function=None
 )
+
+
+def _configured_sync_threshold(collection):
+    try:
+        return int(collection.configuration_json["hnsw"]["sync_threshold"])
+    except (AttributeError, KeyError, TypeError, ValueError) as exc:
+        raise RuntimeError("cannot read the collection's HNSW sync threshold") from exc
+
+
+def _ensure_sync_threshold(collection, desired):
+    if _configured_sync_threshold(collection) != desired:
+        collection.modify(configuration={"hnsw": {"sync_threshold": desired}})
+
+    if _configured_sync_threshold(collection) != desired:
+        raise RuntimeError(f"failed to set HNSW sync threshold to {desired}")
+
+    metadata = dict(collection.metadata or {})
+    if metadata.get("hnsw:sync_threshold") != desired:
+        # hnsw:space is immutable in current Chroma. Omitting it updates the
+        # descriptive metadata without asking Chroma to change the metric.
+        metadata.pop("hnsw:space", None)
+        metadata["hnsw:sync_threshold"] = desired
+        collection.modify(metadata=metadata)
+
+    if _configured_sync_threshold(collection) != desired:
+        raise RuntimeError("metadata update changed the HNSW sync threshold")
+
+
+_ensure_sync_threshold(COLLECTION, SYNC_THRESHOLD)
+
+
+def _memory_log_root():
+    return os.environ.get("METTACLAW_MEMORY_LOG_DIR", "./memory/remembered")
+
+
+def _date_parts(time):
+    match = re.match(r"^(\d{4})-(\d{2})-(\d{2})", str(time))
+    if match:
+        return match.groups()
+    return ("unknown", "unknown", "unknown")
+
+
+def _append_memory_log(item_id, content, time):
+    year, month, day = _date_parts(time)
+    root = _memory_log_root()
+    path = os.path.join(root, year, month, f"{day}.jsonl")
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    row = {
+        "id": item_id,
+        "time": str(time),
+        "collection": COLLECTION_NAME,
+        "content": content,
+    }
+    with open(path, "a", encoding="utf-8") as handle:
+        handle.write(json.dumps(row, ensure_ascii=False, sort_keys=True) + "\n")
 
 def remember(content, embedding, time):
     """
@@ -24,6 +116,7 @@ def remember(content, embedding, time):
         embeddings=[embedding],
         metadatas=[{"time": time}],
     )
+    _append_memory_log(item_id, content, time)
     return item_id
 
 def forget_ids(item_ids):
