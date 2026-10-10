@@ -92,6 +92,11 @@ Raw external Chroma writers must be quiescent; the lock cannot coordinate
 uncontrolled writers. Private CMEM1 exports include texts and vectors and are
 created with private permissions. Keep them outside public repositories.
 
+`MemoryBackend.guard()` is reentrant on the owning thread for the same bridge
+instance. A guarded snapshot can call collection operations while retaining
+the outer file lock. Other threads and processes remain excluded until the
+outer guard exits.
+
 Replay requires `chroma` mode, so its native candidate is not serving answers.
 It checks complete source equality, exact embedding bytes, an independent NumPy
 cosine reference, measured Chroma overlap, updates/deletion, worker recovery and

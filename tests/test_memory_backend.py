@@ -33,6 +33,25 @@ with tempfile.TemporaryDirectory(dir=args.work_dir,prefix='bridge-') as t:
   else:raise AssertionError('rollback accepted a corrupted embedding')
   config={'mode':'chroma','state_dir':str(p/'state'),'client_dir':str(root/'tools'),'socket':str(p/'socket'),'name':'test','profile':{'embedding_output_dim':16},'worker':str(args.worker.resolve()),'module':str(root/'lib/petta/lib_memory_collection.metta')}
   atomic_json(p/'config.json',config);b=MemoryBackend(source,p/'config.json')
+  # Snapshot callers can nest an operation on this same instance; the outer
+  # file lock must still exclude a writer after the inner guard returns.
+  import signal
+  def guard_timeout(*args):raise AssertionError('nested collection guard blocked')
+  previous=signal.signal(signal.SIGALRM,guard_timeout)
+  signal.alarm(5)
+  try:
+   with b.guard():
+    with b.guard():assert b.count()==257
+    probe='''import fcntl,sys
+with open(sys.argv[1], 'a') as lock:
+ try:fcntl.flock(lock,fcntl.LOCK_EX|fcntl.LOCK_NB)
+ except BlockingIOError:sys.exit(0)
+ sys.exit(1)
+'''
+    subprocess.run([sys.executable,'-c',probe,str(b.state/'bridge.lock')],check=True)
+  finally:
+   signal.alarm(0);signal.signal(signal.SIGALRM,previous)
+  print('PASS nested collection guard and writer exclusion')
   os.environ['METTACLAW_MEMORY_BACKEND_CONFIG']=str(p/'config.json')
   try:
    try:configured(source,runtime_profile={'embedding_output_dim':17})

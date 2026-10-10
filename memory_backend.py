@@ -43,6 +43,7 @@ class MemoryBackend:
         self.state = Path(self.config["state_dir"])
         self.state.mkdir(parents=True, exist_ok=True, mode=0o700)
         self.local_lock = threading.RLock()
+        self._guard_held = False
         self.work = queue.Queue(maxsize=16)
         self.native = None
         self.native_epoch = None
@@ -58,10 +59,18 @@ class MemoryBackend:
     @contextlib.contextmanager
     def guard(self):
         with self.local_lock:
+            # A second open() creates an independent flock ownership even in
+            # this process. The owning thread reuses its outer lock instead.
+            if self._guard_held:
+                yield
+                return
             with (self.state / "bridge.lock").open("a") as lock:
                 fcntl.flock(lock, fcntl.LOCK_EX)
+                self._guard_held = True
                 try: yield
-                finally: fcntl.flock(lock, fcntl.LOCK_UN)
+                finally:
+                    self._guard_held = False
+                    fcntl.flock(lock, fcntl.LOCK_UN)
 
     def _mode(self):
         config = json.loads(self.path.read_text())

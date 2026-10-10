@@ -14,7 +14,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           repository: godelclaw/CeTTa
-          ref: 26c17ab92955508e90d8ea3f4b2a919b78b10a94
+          ref: c818a4b214ab84abefdfdc91d1905134215f79d1
           path: cetta
           persist-credentials: false
       - run: sudo apt-get update && sudo apt-get install -y build-essential pkg-config python3 python3-venv libgmp-dev
