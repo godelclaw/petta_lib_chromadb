@@ -73,6 +73,10 @@ def _ensure_sync_threshold(collection, desired):
 
 _ensure_sync_threshold(COLLECTION, SYNC_THRESHOLD)
 
+# Optional migration adapter. The default remains the existing Chroma store.
+from memory_backend import configured
+COLLECTION = configured(COLLECTION, runtime_profile=_collection_metadata)
+
 
 def _memory_log_root():
     return os.environ.get("METTACLAW_MEMORY_LOG_DIR", "./memory/remembered")
@@ -289,7 +293,9 @@ def unlink_episode(item_id, linked_time):
         if linked_memories:
             metadata["linkedEpisodes"] = linked_memories
         else:
-            metadata.pop("linkedEpisodes", None)
+            # Chroma update merges metadata. An omitted key would retain the
+            # old links; None explicitly deletes the last link field.
+            metadata["linkedEpisodes"] = None
         COLLECTION.update(
             ids=[item_id],
             metadatas=[metadata],
@@ -311,4 +317,3 @@ def query_linked_episodes(item_id):
         return []
     metadata = res.get("metadatas", [{}])[0] or {}
     return metadata.get("linkedEpisodes", [])
-

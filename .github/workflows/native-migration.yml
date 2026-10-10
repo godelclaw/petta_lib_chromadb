@@ -1,0 +1,35 @@
+name: Native collection migration
+on: [push, pull_request, workflow_dispatch]
+permissions:
+  contents: read
+jobs:
+  generated-fixture:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          path: bridge
+          persist-credentials: false
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          repository: godelclaw/CeTTa
+          ref: c942580252a8ef33d3f2d2ef3d42ca1a918ff3ab
+          path: cetta
+          persist-credentials: false
+      - run: sudo apt-get update && sudo apt-get install -y build-essential pkg-config python3 python3-venv libgmp-dev
+      - name: Install isolated native service binaries
+        run: |
+          make -C cetta -j2 BUILD=core ENABLE_LIB_PROLOG=0 ENABLE_JSON_GSLT=0 ENABLE_MANAGED_SYMBOLS=1 install-memory-service MEMORY_SERVICE_INSTALL_ARGS="--prefix $RUNNER_TEMP/cetta-prefix"
+      - name: Install the pinned migration environment
+        run: |
+          python3 -m venv bridge/.venv
+          bridge/.venv/bin/pip install -r bridge/requirements-migration.txt
+      - name: Generated replay, shadow, cutover and rollback
+        env:
+          OPENBLAS_NUM_THREADS: '1'
+          OMP_NUM_THREADS: '1'
+        run: |
+          bridge/.venv/bin/python bridge/tests/test_memory_backend.py --cetta-root cetta --server "$RUNNER_TEMP/cetta-prefix/lib/cetta-memory/current/bin/cetta-space-service" --worker "$RUNNER_TEMP/cetta-prefix/lib/cetta-memory/current/bin/cetta-value-worker"
+          cd bridge
+          .venv/bin/python -m unittest discover -s tests -p test_configuration.py

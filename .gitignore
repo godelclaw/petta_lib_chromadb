@@ -1,2 +1,7 @@
 __pycache__/
 *.py[cod]
+.venv/
+memory_backend.json
+*.cmem
+chroma_db/
+private-memory/

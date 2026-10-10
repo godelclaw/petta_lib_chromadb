@@ -1,0 +1,9 @@
+{
+  "embedding_model": "example-encoder-v1",
+  "embedding_backend": "sentence-transformers",
+  "embedding_output_dim": 16,
+  "embedding_protocol": "example-encoder-16-v1",
+  "embedding_normalized": true,
+  "embedding_query_prompt_name": "query",
+  "hnsw:space": "cosine"
+}
